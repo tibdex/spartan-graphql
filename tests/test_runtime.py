@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable, Mapping
-from typing import Annotated, Any, Final, Literal, assert_type
+from typing import Annotated, Final, Literal, assert_type
 
 import pytest
 
@@ -11,7 +11,6 @@ from spartan_graphql.runtime import (
     OperationRequest,
     ProtocolError,
     RequestError,
-    merge,
 )
 from spartan_graphql.runtime._compat import TypedDict
 from spartan_graphql.runtime._reflection import NON_NULL
@@ -51,11 +50,15 @@ def test_a_request_s_repr_is_how_it_is_written(
     assert repr(request_) == expected
 
 
-def test_a_request_tells_its_operation_type_at_runtime_too() -> None:
+def test_a_request_tells_what_it_is_at_runtime_too() -> None:
     request = _LIST_BOOKS({})
     assert_type(request.operation_type, Literal["query"])
     assert request.operation_type == "query"
-    assert merge(request, request).operation_type == "query"
+    assert request.operation_name == "ListBooks"
+    assert request.data_type == dict[str, object]
+    assert request.returning_error().data_type == dict[str, object]
+    assert request.execution_error_handling == "raise"
+    assert request.returning_error().execution_error_handling == "return"
 
 
 def test_a_request_is_the_spec_s_json_envelope() -> None:
@@ -164,7 +167,7 @@ def _sent(
     /,
     *,
     injectors: _Injectors,
-) -> Any:
+) -> object:
     return json.loads(bytes(operation(variables).prepare(injectors=injectors)))[
         "variables"
     ]

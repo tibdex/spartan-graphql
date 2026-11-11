@@ -25,7 +25,7 @@ class UnexpectedNullError(Error):
 
     @property
     def path(self) -> Sequence[str | int]:
-        """The keys and list indices leading from the root of the data to the `null`, as in a GraphQL error's `path`."""
+        """The keys and list indices from the root of the data to the `null`, as in a GraphQL error's `path`."""
         return self._path
 
     def __init__(self, path: list[str | int], /) -> None:
@@ -105,9 +105,9 @@ class ExecutionError(ResponseError, Generic[_Data_co]):
 
         data = deepcopy(self.data)
 
-        if self._partial_data_parser is not None:
+        if self._partial_data_decoder is not None:
             try:
-                self._partial_data_parser(data)
+                self._partial_data_decoder(data)
             except UnexpectedNullError:
                 return None
 
@@ -120,9 +120,9 @@ class ExecutionError(ResponseError, Generic[_Data_co]):
         *,
         data: Mapping[str, object] | None,
         extensions: Mapping[str, object] | None,
-        partial_data_parser: Callable[[object], object] | None,
+        partial_data_decoder: Callable[[object], object] | None,
     ) -> None:
         """Private."""
         super().__init__(errors, extensions=extensions)
         self.data = data
-        self._partial_data_parser: Final = partial_data_parser
+        self._partial_data_decoder: Final = partial_data_decoder

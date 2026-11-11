@@ -4,6 +4,7 @@ from typing import final
 
 from graphql import GraphQLError, assert_name
 
+from spartan_graphql._error_note import error_note
 from spartan_graphql.document_sibling_module import DocumentSiblingModule
 from spartan_graphql.scalar import Scalar
 
@@ -33,10 +34,17 @@ class Config:
     """
 
     def __post_init__(self) -> None:
-        if self.non_null_directive_name is not None:
-            try:
-                assert_name(self.non_null_directive_name)
-            except GraphQLError as error:
-                raise ValueError(
-                    f"Cannot name the client directive `{self.non_null_directive_name}`: {error.message}"
-                ) from error
+        for field_name, names in (
+            ("injector_names", sorted(self.injector_names)),
+            ("non_null_directive_name", [self.non_null_directive_name]),
+            ("struct_interface_name", [self.struct_interface_name]),
+        ):
+            with error_note(f"In `{field_name}`."):
+                for name in names:
+                    if name is None:
+                        continue
+
+                    try:
+                        assert_name(name)
+                    except GraphQLError as error:
+                        raise ValueError(error.message) from error

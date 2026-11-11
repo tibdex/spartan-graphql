@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: astral-sh/setup-uv@v10.3.3
       - run: uv build --wheel
       - uses: actions/upload-artifact@v7
         with:
@@ -25,9 +25,9 @@ jobs:
       # Trusted publishing.
       id-token: write
     steps:
-      - uses: astral-sh/setup-uv@v10.3.2
       - uses: actions/download-artifact@v8
         with:
           name: wheel
           path: dist
-      - run: uv publish
+      # Creates the attestations PyPI shows as the release's provenance.
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -27,16 +27,16 @@ from ._compat import (
 )
 from .error import UnexpectedNullError
 
-type Mode = Literal["parse", "partial parse", "serialize"]
+type Mode = Literal["decode", "partial decode", "encode"]
 """What a builder's converters do.
 
-- `"parse"` converts the data of a response in place, and raises on the null of a `@nonNull` field.
-- `"partial parse"` does the same for a response with errors, but moves the null of a `@nonNull` field up to its nearest nullable parent, as the server does for a non-null field.
-- `"serialize"` converts a copy of the variables to what goes on the wire.
+- `"decode"` converts the data of a response in place, and raises on the null of a `@nonNull` field.
+- `"partial decode"` does the same for a response with errors, but moves the null of a `@nonNull` field up to its nearest nullable parent, as the server does for a non-null field.
+- `"encode"` converts a copy of the variables to what goes on the wire.
 """
 
 type Convert = Callable[[object], object]
-"""A parser converts in place, a serializer copies: a response is ours, the variables are the caller's."""
+"""A decoder converts in place, an encoder copies: a response is ours, the variables are the caller's."""
 
 _QUALIFIERS: Final = frozenset({NotRequired, ReadOnly, Required})
 
@@ -107,16 +107,16 @@ class _Builder:
 
     def __init__(self, mode: Mode, /) -> None:
         match mode:
-            case "parse":
-                parses, partial = True, False
-            case "partial parse":
-                parses, partial = True, True
-            case "serialize":
-                parses, partial = False, False
+            case "decode":
+                decodes, partial = True, False
+            case "partial decode":
+                decodes, partial = True, True
+            case "encode":
+                decodes, partial = False, False
             case _ as never:
                 assert_never(never)
 
-        self._parses: Final = parses
+        self._decodes: Final = decodes
         self._partial: Final = partial
         self._needs: Final[dict[object, bool]] = {}
         self._converters: Final[dict[object, Convert]] = {}
@@ -143,7 +143,7 @@ class _Builder:
 
             inner, metadata = _unwrap(type_)
             needs[type_] = any(isinstance(item, Codec) for item in metadata) or (
-                NON_NULL in metadata and self._parses
+                NON_NULL in metadata and self._decodes
             )
             children[type_] = _children(inner)
             pending.extend(children[type_])
@@ -190,11 +190,11 @@ class _Builder:
 
         if codecs:
             (codec,) = codecs
-            convert = cast(Convert, codec.decode if self._parses else codec.encode)
+            convert = cast(Convert, codec.decode if self._decodes else codec.encode)
         elif self._needs_work(inner):
             convert = self._build_structure(inner)
 
-        if NON_NULL in metadata and self._parses:
+        if NON_NULL in metadata and self._decodes:
             return _non_null_converter(convert)
 
         assert convert is not None, f"Expected `{type_}` to need work."
@@ -217,7 +217,7 @@ class _Builder:
             for key, hint in get_type_hints(type_, include_extras=True).items()
             if (converter := self._build(hint)) is not None
         )
-        in_place = self._parses
+        in_place = self._decodes
 
         def convert(value: object, /) -> object:
             assert isinstance(value, Mapping)
@@ -341,25 +341,25 @@ def _non_null_converter(convert: Convert | None, /) -> Convert:
     return check
 
 
-_PARSE: Final = _Builder("parse")
-_PARTIAL_PARSE: Final = _Builder("partial parse")
-_SERIALIZE: Final = _Builder("serialize")
+_DECODE: Final = _Builder("decode")
+_PARTIAL_DECODE: Final = _Builder("partial decode")
+_ENCODE: Final = _Builder("encode")
 
 
-def build_parser(type_: object, /, *, partial: bool) -> Convert | None:
-    return (_PARTIAL_PARSE if partial else _PARSE).build(type_)
+def build_decoder(type_: object, /, *, partial: bool) -> Convert | None:
+    return (_PARTIAL_DECODE if partial else _DECODE).build(type_)
 
 
-def build_serializer(type_: object, /) -> Convert | None:
-    return _SERIALIZE.build(type_)
+def build_encoder(type_: object, /) -> Convert | None:
+    return _ENCODE.build(type_)
 
 
-def build_injector_serializers(
+def build_injector_encoders(
     injector_functions_type: object, /
 ) -> dict[str, Convert | None]:
     return {
-        # Each hint is `Callable[[], T]`: the serializer is `T`'s.
-        name: build_serializer(get_args(_unwrap(hint)[0])[-1])
+        # Each hint is `Callable[[], T]`: the encoder is `T`'s.
+        name: build_encoder(get_args(_unwrap(hint)[0])[-1])
         for name, hint in get_type_hints(
             injector_functions_type, include_extras=True
         ).items()

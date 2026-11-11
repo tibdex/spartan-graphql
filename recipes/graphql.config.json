@@ -1,0 +1,68 @@
+{
+  "projects": {
+    "batching": {
+      "schema": "batching/schema.graphqls",
+      "documents": "batching/operations.graphql",
+      "extensions": {
+        "spartan": {
+          "moduleRoot": "..",
+          "package": "recipes.batching.generated"
+        }
+      }
+    },
+    "fuzzing": {
+      "schema": "fuzzing/schema.graphqls",
+      "documents": "fuzzing/operations.graphql",
+      "extensions": {
+        "spartan": {
+          "moduleRoot": "..",
+          "package": "recipes.fuzzing.generated",
+          "scalars": {
+            "ISBN": {
+              "type": "..recipe.ISBN"
+            }
+          }
+        }
+      }
+    },
+    "tracing": {
+      "schema": "tracing/schema.graphqls",
+      "documents": "tracing/operations.graphql",
+      "extensions": {
+        "spartan": {
+          "moduleRoot": "..",
+          "package": "recipes.tracing.generated"
+        }
+      }
+    },
+    "upload": {
+      "schema": "upload/schema.graphqls",
+      "documents": "upload/operations.graphql",
+      "extensions": {
+        "spartan": {
+          "moduleRoot": "..",
+          "package": "recipes.upload.generated",
+          "scalars": {
+            "Upload": {
+              "type": "..recipe.Upload",
+              "codec": {
+                "decode": "..recipe.decode",
+                "encode": "..recipe.encode"
+              }
+            }
+          }
+        }
+      }
+    },
+    "validation": {
+      "schema": "validation/schema.graphqls",
+      "documents": "validation/operations.graphql",
+      "extensions": {
+        "spartan": {
+          "moduleRoot": "..",
+          "package": "recipes.validation.generated"
+        }
+      }
+    }
+  }
+}

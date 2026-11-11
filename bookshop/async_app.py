@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import aclosing
 from typing import assert_type
 
@@ -7,13 +8,15 @@ from bookshop.graphql.schema import OrderStatus
 from bookshop.scalar import ISBN
 
 
-async def title(isbn: ISBN, /) -> str:
-    data = await send(GetBook({"lookup": {"isbn": isbn}}), timeout=5.0)
+async def title_of(isbn: ISBN, /) -> str:
+    async with asyncio.timeout(5):
+        data = await send(GetBook({"lookup": {"isbn": isbn}}))
+
     assert_type(data, GetBookData)
     return data["book"]["title"]
 
 
-async def watch(order_id: str, /) -> list[OrderStatus]:
+async def statuses_of(order_id: str, /) -> list[OrderStatus]:
     statuses: list[OrderStatus] = []
     events = subscribe(OnOrderStatusChanged({"orderId": order_id}))
 

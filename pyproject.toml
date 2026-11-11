@@ -17,7 +17,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "graphql-core>=3.3.1",
+  "graphql-core>=3.3.2",
   # Python 3.15 is the first whose standard library has all it provides.
   "typing-extensions>=4.16.0; python_version < '3.15'",
 ]
@@ -35,7 +35,7 @@ license-files = ["LICENSE"]
 name = "spartan-graphql"
 readme = "README.md"
 requires-python = ">=3.12"
-version = "1.0.4"
+version = "1.1.0"
 
 [project.optional-dependencies]
 # Only reading a YAML graphql-config file needs it.
@@ -52,16 +52,21 @@ Issues = "https://github.com/tibdex/spartan-graphql/issues"
 [dependency-groups]
 dev = [
   "coverage",
-  "httpx2",          # The bookshop's transport.
+  "httpx2",                             # The bookshop's transport.
+  "hypothesis",                         # Generates values of the generated types.
   "mypy",
-  "pyright[nodejs]", # With the Node.js it runs on, rather than whichever is installed.
+  "opentelemetry-api",                  # The tracing recipe.
+  "opentelemetry-sdk",                  # Its tests.
+  "opentelemetry-semantic-conventions", # The attribute names it sets.
+  "prek",
+  "pydantic",                           # Checks that what `parse()` returns is what the generated types promise.
   "pyrefly",
+  "pyright[nodejs]",                    # With the Node.js it runs on, rather than whichever is installed.
   "pytest",
   "pyyaml",
   "ruff",
   "ty",
-  "types-pyyaml",    # So that `_get_loader()` can return `yaml.safe_load` typed.
-  "prek",
+  "types-pyyaml",                       # So that `_get_loader()` can return `yaml.safe_load` typed.
 ]
 
 [tool.uv.build-backend]
@@ -97,7 +102,6 @@ skip_covered = true
 [tool.pytest]
 filterwarnings = ["error"]
 strict = true
-testpaths = ["tests"]
 
 [tool.ruff]
 extend-exclude = [
@@ -105,6 +109,7 @@ extend-exclude = [
   "bookshop/graphql",
   "bookshop/*_graphql.py",
   "src/spartan_graphql/_cli/*_graphql.py",
+  "recipes/*/generated",
   # Its code blocks are the generated package's and the bookshop's modules verbatim, which `test_readme.py` checks.
   "README.md",
 ]
@@ -138,29 +143,38 @@ ignore = [
   "undocumented-public-package",
   "useless-import-alias",                # `X as X` is how PEP 484 marks a re-export, in any module and not only an `__init__.py`.
 ]
-select = ["ALL"]
+select = [
+  "ALL",
+  "import-private-name", # Ensures `bookshop/` and `recipes/` can be implemented with the public API only.
+]
 
 [tool.ruff.lint.per-file-ignores]
-"bookshop/*" = [
-  "async-function-with-timeout",
-  "print",
-  "pytest-assert-in-except",
+"conftest.py" = ["subprocess-without-shell-equals-true"]
+"bookshop/*" = ["print"]
+"src/*" = [
+  "private-member-access",      # OK for the library implementation to use its own internal parts.
+  "pytest-composite-assertion", # Some type checkers cannot narrow `a is not None and b is not None` when assigned to a variable.
 ]
-"src/*" = ["private-member-access", "pytest-composite-assertion"]
-"src/spartan_graphql/runtime/*" = ["relative-imports"]
+"src/spartan_graphql/runtime/*" = [
+  "relative-imports", # Copied into each generated package, where only relative imports still resolve.
+]
 "src/spartan_graphql/runtime/error.py" = [
-  "non-pep695-generic-class", # A legacy `TypeVar`, since a default for a PEP 695 type parameter needs Python 3.13.
+  # A legacy `TypeVar`, since a default for a PEP 695 type parameter needs Python 3.13.
+  # Not a `# noqa` because the README shows the file.
+  "non-pep695-generic-class",
 ]
 "src/spartan_graphql/_cli/__init__.py" = ["print"]
+"recipes/*/test_*.py" = [
+  "relative-imports", # To make recipes portable.
+]
 "tests/__resources__/*" = ["implicit-namespace-package"]
 "tests/*" = [
-  "any-type",
+  "import-private-name",
   "invalid-class-name",
   "magic-value-comparison",
   "mixed-case-variable-in-class-scope",
   "private-member-access",
   "subprocess-without-shell-equals-true",
-  "too-many-positional-arguments",
   "unused-function-argument",
   "unused-lambda-argument",
 ]

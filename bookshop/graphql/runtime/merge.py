@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
 from json import dumps
+from types import GenericAlias
 from typing import Any, Final, Literal, assert_never, cast, final, overload, override
 
 from ._operation_type import OperationType
@@ -23,11 +24,29 @@ from .request import PreparedRequest, Request
 
 @final
 class _MergedRequest[Type: OperationType, Data](Request[Type, Data]):
-    def __init__(self, requests: Sequence[OperationRequest[Type, object]], /) -> None:
-        if not requests:
-            raise ValueError("Cannot merge no request.")
+    def __init__(
+        self,
+        requests: Sequence[OperationRequest[Type, object]],
+        /,
+        *,
+        operation_name: str,
+    ) -> None:
+        match requests:
+            case []:
+                raise ValueError("Expected at least one request to merge.")
+            case [request]:
+                operation_name = request.operation_name
+            case _:
+                ...
 
-        super().__init__(operation_type=requests[0].operation_type)
+        data_type: Any = GenericAlias(
+            tuple, tuple(request.data_type for request in requests)
+        )
+        super().__init__(
+            operation_type=requests[0].operation_type,
+            operation_name=operation_name,
+            data_type=data_type,
+        )
         self._requests: Final = tuple(requests)
 
     @override
@@ -39,7 +58,12 @@ class _MergedRequest[Type: OperationType, Data](Request[Type, Data]):
         # Only `merge()`'s overloads know the tuple's type.
         return cast(
             PreparedRequest[Data],
-            _prepare_merged(self.operation_type, self._requests, injectors=injectors),
+            _prepare_merged(
+                self.operation_type,
+                self._requests,
+                operation_name=self.operation_name,
+                injectors=injectors,
+            ),
         )
 
 
@@ -47,7 +71,11 @@ class _MergedRequest[Type: OperationType, Data](Request[Type, Data]):
 # Typed position by position up to 6 requests, as many as typeshed's `asyncio.gather()`: https://github.com/python/typeshed/blob/1ee8b928886a93b060bdafbf1e30dc0bb7c85848/stdlib/asyncio/tasks.pyi#L108-L155
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2](
-    first: OperationRequest[Type, D1], second: OperationRequest[Type, D2], /
+    first: OperationRequest[Type, D1],
+    second: OperationRequest[Type, D2],
+    /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[D1, D2]]: ...
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3](
@@ -55,6 +83,8 @@ def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3](
     second: OperationRequest[Type, D2],
     third: OperationRequest[Type, D3],
     /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[D1, D2, D3]]: ...
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4](
@@ -63,6 +93,8 @@ def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4](
     third: OperationRequest[Type, D3],
     fourth: OperationRequest[Type, D4],
     /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[D1, D2, D3, D4]]: ...
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4, D5](
@@ -72,6 +104,8 @@ def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4, D5](
     fourth: OperationRequest[Type, D4],
     fifth: OperationRequest[Type, D5],
     /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[D1, D2, D3, D4, D5]]: ...
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4, D5, D6](
@@ -82,22 +116,28 @@ def merge[Type: (Literal["query"], Literal["mutation"]), D1, D2, D3, D4, D5, D6]
     fifth: OperationRequest[Type, D5],
     sixth: OperationRequest[Type, D6],
     /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[D1, D2, D3, D4, D5, D6]]: ...
 @overload
 def merge[Type: (Literal["query"], Literal["mutation"]), Data](
-    requests: Sequence[OperationRequest[Type, Data]], /
+    requests: Sequence[OperationRequest[Type, Data]],
+    /,
+    *,
+    operation_name: str = ...,
 ) -> Request[Type, tuple[Data, ...]]: ...
-def merge(*args: Any) -> Request[Any, Any]:
+def merge(*args: Any, operation_name: str = "MergedOperation") -> Request[Any, Any]:
     """Return one request for several queries, or several mutations, whose data is a tuple of their data.
 
     Positional requests are typed position by position, a sequence by its common data type.
+    *operation_name* is only used when there are several requests: a single one is sent with its own name.
 
     The errors of a response are split per request: `PreparedRequest.parse()` raises them as an `ExceptionGroup`, unless every failing request is from `returning_error()`, in which case each gets its error in its place.
     A response with no data raises its error unsplit.
     """
     # The sequence overload takes one argument, the others take the requests themselves.
     requests = args[0] if len(args) == 1 else args
-    return _MergedRequest(requests)
+    return _MergedRequest(requests, operation_name=operation_name)
 
 
 def _prepare_merged(
@@ -105,6 +145,7 @@ def _prepare_merged(
     requests: Sequence[OperationRequest[OperationType, object]],
     /,
     *,
+    operation_name: str,
     injectors: _Injectors | None,
 ) -> PreparedRequest[tuple[object, ...]]:
     operations = [request._operation for request in requests]
@@ -118,7 +159,6 @@ def _prepare_merged(
         operations[0]._request_body(variables[0])
         if count == 1
         else _encode_body(
-            operation_type,
             [
                 _Part(
                     name=operation._name,
@@ -129,14 +169,16 @@ def _prepare_merged(
                     operations, variables, strict=True
                 )
             ],
+            operation_type=operation_type,
+            operation_name=operation_name,
         )
     )
 
-    def parse(raw: bytes, /) -> tuple[object, ...]:
+    def parse(body: bytes, /) -> tuple[object, ...]:
         failures: dict[int, ExecutionError[object]] = {}
 
         try:
-            data = _parse_response(raw, partial_data_parser=None)
+            data = _parse_response(body, partial_data_decoder=None)
         except ExecutionError as error:
             # With no data, the merge failed as a whole: no request's error to return.
             if error.data is None:
@@ -157,7 +199,7 @@ def _prepare_merged(
                         operation_errors,
                         data=split[index],
                         extensions=error.extensions,
-                        partial_data_parser=operation._partial_data_parser,
+                        partial_data_decoder=operation._partial_data_decoder,
                     )
                     failure.add_note(_origin_note(operation._name, operation_variables))
                     failures[index] = failure
@@ -174,9 +216,9 @@ def _prepare_merged(
         for index, (operation, operation_variables, operation_data) in enumerate(
             zip(operations, variables, split, strict=True)
         ):
-            if index not in failures and operation._data_parser is not None:
+            if index not in failures and operation._data_decoder is not None:
                 try:
-                    operation._data_parser(operation_data)
+                    operation._data_decoder(operation_data)
                 except UnexpectedNullError as null_error:
                     null_error.add_note(
                         _origin_note(operation._name, operation_variables)
@@ -194,7 +236,7 @@ def _prepare_merged(
 def _raises_execution_error(
     request: OperationRequest[OperationType, object], /
 ) -> bool:
-    match request._on_execution_error:
+    match request.execution_error_handling:
         case "raise":
             return True
         case "return":
@@ -202,8 +244,6 @@ def _raises_execution_error(
         case _ as never:
             assert_never(never)
 
-
-_MERGED_OPERATION_NAME: Final = "MergedOperation"
 
 _INDEX_SEPARATOR: Final = "_"
 
@@ -230,7 +270,13 @@ def _template_parts(document: str, /) -> tuple[str, str, Mapping[str, str]]:
     return variable_definitions, "\n".join(root_selections), fragments
 
 
-def _encode_body(operation_type: OperationType, parts: Sequence[_Part], /) -> bytes:
+def _encode_body(
+    parts: Sequence[_Part],
+    /,
+    *,
+    operation_type: OperationType,
+    operation_name: str,
+) -> bytes:
     assert len(parts) > 1
 
     variable_definitions: list[str] = []
@@ -263,7 +309,7 @@ def _encode_body(operation_type: OperationType, parts: Sequence[_Part], /) -> by
         [
             "\n".join(
                 [
-                    f"{operation_type} {_MERGED_OPERATION_NAME}{signature} {{",
+                    f"{operation_type} {operation_name}{signature} {{",
                     *selections,
                     "}",
                 ]
@@ -273,7 +319,7 @@ def _encode_body(operation_type: OperationType, parts: Sequence[_Part], /) -> by
     )
     return dumps(
         {
-            "operationName": _MERGED_OPERATION_NAME,
+            "operationName": operation_name,
             "query": document,
             "variables": variables,
         },

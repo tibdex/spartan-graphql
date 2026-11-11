@@ -110,7 +110,7 @@ def test_a_merge_is_a_request_and_a_sequence_merges_into_a_tuple_of_its_common_d
         {"cancelOrder": None},
     )
 
-    with pytest.raises(ValueError, match="Cannot merge no request"):
+    with pytest.raises(ValueError, match=r"^Expected at least one request to merge\.$"):
         merge([])
 
 

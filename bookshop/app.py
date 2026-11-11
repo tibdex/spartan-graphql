@@ -53,7 +53,7 @@ def titles(
     labels: list[str] = []
 
     for book in data["books"]:
-        # Selected under `@include`, `genre` is a `NotRequired` key too.
+        # Selected with `@include`, `genre` is a `NotRequired` key too.
         if "genre" in book:
             assert_type(book["genre"], Genre)
             labels.append(f"{book['title']} ({book['genre'].lower()})")
@@ -240,7 +240,7 @@ def cancel(order_ids: list[str], /) -> list[str]:
     ]
 
 
-def watch(order_id: str, /) -> list[OrderStatus]:
+def statuses_of(order_id: str, /) -> list[OrderStatus]:
     statuses: list[OrderStatus] = []
     events = subscribe(OnOrderStatusChanged({"orderId": order_id}))
 

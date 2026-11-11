@@ -1,0 +1,7 @@
+mutation AttachFiles(
+  $isbn: ID!
+  $cover: Upload
+  $attachments: [AttachmentInput!]!
+) {
+  attachFiles(isbn: $isbn, cover: $cover, attachments: $attachments)
+}

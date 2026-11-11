@@ -205,7 +205,9 @@ def _parse_project(
     entry = parse_dict(value)
     extensions = optional(entry, "extensions", parse_dict, default={})
 
-    if (extension := extensions.get(_EXTENSION_NAME)) is None:
+    extension = extensions.get(_EXTENSION_NAME)
+
+    if extension is None:
         return None
 
     schema = required(entry, "schema", parse_schema_pointer)

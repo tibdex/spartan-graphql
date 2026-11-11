@@ -11,9 +11,13 @@ from .injection import _Injectors
 
 
 class Request[Type: OperationType, Data](ABC):
-    def __init__(self, *, operation_type: Type) -> None:
+    def __init__(
+        self, *, operation_type: Type, operation_name: str, data_type: type[Data]
+    ) -> None:
         """Private."""
         self.operation_type: Final = operation_type
+        self.operation_name: Final = operation_name
+        self.data_type: Final = data_type
 
     @abstractmethod
     def prepare(self, *, injectors: _Injectors | None = None) -> PreparedRequest[Data]:
@@ -30,5 +34,5 @@ class PreparedRequest[Data]:
     def __bytes__(self) -> bytes:
         return self._body
 
-    def parse(self, raw: bytes, /) -> Data:
-        return self._parse(raw)
+    def parse(self, body: bytes, /) -> Data:
+        return self._parse(body)

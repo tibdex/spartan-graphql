@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 import pytest
 
 import bookshop.transport
-from bookshop.app import watch
+from bookshop.app import statuses_of
 from bookshop.app_graphql import GetBook, OnOrderStatusChanged
 from bookshop.graphql.runtime import ExecutionError, RequestError
 from bookshop.scalar import ISBN
@@ -267,6 +267,6 @@ def test_watching_an_order_follows_its_statuses(
 
     bookshop_server(handle)
 
-    statuses_seen = watch("o1")
+    statuses_seen = statuses_of("o1")
 
     assert statuses_seen == statuses

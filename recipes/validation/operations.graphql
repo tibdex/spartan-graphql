@@ -1,0 +1,13 @@
+query GetOrder($id: ID!) {
+  order(id: $id) {
+    id
+    status
+  }
+}
+
+query ListOrders {
+  orders {
+    id
+    status
+  }
+}

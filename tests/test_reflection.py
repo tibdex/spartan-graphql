@@ -14,8 +14,8 @@ from spartan_graphql.runtime._reflection import (
     NON_NULL,
     Codec,
     _Builder,
-    build_parser,
-    build_serializer,
+    build_decoder,
+    build_encoder,
 )
 
 type DateTime = Annotated[
@@ -102,7 +102,7 @@ class _LatestBook(TypedDict):
 def test_a_type_is_built_by_one_thread_at_a_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    builder = _Builder("parse")
+    builder = _Builder("decode")
     parsed: list[object] = []
 
     def parse() -> None:
@@ -113,7 +113,7 @@ def test_a_type_is_built_by_one_thread_at_a_time(
     other = Thread(target=parse)
     new_converter = _Builder._new_converter
 
-    def new_converter_while_other_parses(self: _Builder, type_: object, /) -> object:
+    def new_converter_while_other_decodes(self: _Builder, type_: object, /) -> object:
         if type_ is _LatestBook:
             other.start()
             # Long enough for the other thread to finish, were it not waiting on this build.
@@ -121,7 +121,7 @@ def test_a_type_is_built_by_one_thread_at_a_time(
 
         return new_converter(self, type_)
 
-    monkeypatch.setattr(_Builder, "_new_converter", new_converter_while_other_parses)
+    monkeypatch.setattr(_Builder, "_new_converter", new_converter_while_other_decodes)
     builder.build(_LatestBook)
     other.join()
 
@@ -145,10 +145,10 @@ class _Mixed(TypedDict):
 
 
 def test_a_type_needing_nothing_builds_to_none() -> None:
-    assert build_parser(_Card, partial=False) is None
-    assert build_serializer(_Card) is None
-    # A `@nonNull` field is checked when parsing, but means nothing when serializing.
-    assert build_parser(_Shelf, partial=False) is not None
+    assert build_decoder(_Card, partial=False) is None
+    assert build_encoder(_Card) is None
+    # A `@nonNull` field is checked when decoding, but means nothing when encoding.
+    assert build_decoder(_Shelf, partial=False) is not None
 
 
 _W = _OPENED_ON_THE_WIRE
@@ -232,13 +232,13 @@ _P = _OPENED
         ),
     ],
 )
-def test_parsing_converts_in_place(
+def test_decoding_converts_in_place(
     type_: type, data: dict[str, object], parsed: dict[str, object]
 ) -> None:
-    parse = build_parser(type_, partial=False)
-    assert parse is not None
+    decode = build_decoder(type_, partial=False)
+    assert decode is not None
 
-    parse(data)
+    decode(data)
 
     assert data == parsed
 
@@ -269,17 +269,17 @@ def test_parsing_converts_in_place(
 def test_an_unexpected_null_raises_naming_its_exact_path(
     data: dict[str, object], path: list[object], message: str
 ) -> None:
-    parse = build_parser(_Data, partial=False)
-    assert parse is not None
+    decode = build_decoder(_Data, partial=False)
+    assert decode is not None
 
     with pytest.raises(UnexpectedNullError) as error_info:
-        parse(data)
+        decode(data)
 
     assert (error_info.value.path, str(error_info.value)) == (path, message)
 
 
 @pytest.mark.parametrize(
-    ("variables", "serialized"),
+    ("variables", "encoded"),
     [
         pytest.param(
             {
@@ -311,14 +311,14 @@ def test_an_unexpected_null_raises_naming_its_exact_path(
         ),
     ],
 )
-def test_serializing_copies_rather_than_mutating(
-    variables: dict[str, object], serialized: dict[str, object]
+def test_encoding_copies_rather_than_mutating(
+    variables: dict[str, object], encoded: dict[str, object]
 ) -> None:
-    serialize = build_serializer(_Variables)
-    assert serialize is not None
+    encode = build_encoder(_Variables)
+    assert encode is not None
     before = repr(variables)
 
-    assert serialize(variables) == serialized
+    assert encode(variables) == encoded
     assert repr(variables) == before
 
 
@@ -339,4 +339,4 @@ def test_serializing_copies_rather_than_mutating(
 )
 def test_a_union_is_rejected_when_built(type_: type, message: str) -> None:
     with pytest.raises(TypeError, match=message):
-        build_parser(type_, partial=False)
+        build_decoder(type_, partial=False)

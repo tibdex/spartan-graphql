@@ -448,9 +448,9 @@ class PackageEmitter:
         def fragment_reference(fragment_name: str, /) -> ast.expr:
             spelling = self._fragment_spellings[fragment_name]
 
-            if (
-                fragment_document := self._fragment_documents[fragment_name]
-            ) == document:
+            fragment_document = self._fragment_documents[fragment_name]
+
+            if fragment_document == document:
                 return name(spelling)
 
             alias = aliases.setdefault(
