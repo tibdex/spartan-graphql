@@ -6,17 +6,13 @@ from typing import Any
 import pytest
 from graphql import GraphQLSchema, OperationDefinitionNode, parse, validate
 
-import bookshop.app_graphql
-import bookshop.get_order_graphql
-from bookshop.graphql.runtime import (
-    Operation as BookshopOperation,
-    merge as merge_bookshop,
-)
+from bookshop.graphql.runtime import merge as merge_bookshop
 from bookshop.injectors import INJECTORS
 from spartan_graphql._generator._merge import (
     print_merge_template,
 )
 from spartan_graphql.runtime import ExecutionError, Operation, Request, merge
+from tests._bookshop import all_bookshop_operations
 
 _PLACE_ORDER = """
 mutation PlaceOrder($order: PlaceOrderInput!, $note: String! = "gift") {
@@ -72,10 +68,13 @@ def test_operations_merge_into_one() -> None:
     place_order = _operation(_PLACE_ORDER)
     request = merge(
         place_order({"order": 1, "note": "n"}),
-        _operation(_CANCEL_ORDER)({"cancellation": 2}),
+        _operation(_CANCEL_ORDER)({"cancellation": 2}).returning_error(),
         place_order({"order": 3}),
     )
 
+    assert request.operation_type == "mutation"
+    assert request.operation_name == "MergedOperation"
+    assert request.data_type == tuple[object, object, object]
     assert _sent(request) == {
         "operationName": "MergedOperation",
         "query": """mutation MergedOperation($order_0: PlaceOrderInput!, $note_0: String! = "gift", $cancellation_1: CancelOrderInput, $order_2: PlaceOrderInput!, $note_2: String! = "gift") {
@@ -223,6 +222,20 @@ def test_the_errors_of_a_merge_split_back_to_their_operations_with_their_own_pat
     )
 
 
+def test_a_merge_is_named_after_what_it_does_when_asked() -> None:
+    cancel = _operation(_CANCEL_ORDER)
+    merged = merge(
+        cancel({"cancellation": 1}),
+        cancel({"cancellation": 2}),
+        operation_name="CancelAll",
+    )
+    body = _sent(merged)
+
+    assert merged.operation_name == "CancelAll"
+    assert body["operationName"] == "CancelAll"
+    assert body["query"].startswith("mutation CancelAll(")
+
+
 def test_a_merge_of_one_request_sends_and_reads_it_as_itself() -> None:
     request = merge([_operation(_CANCEL_ORDER)({"cancellation": 2}).returning_error()])
     (error,) = _received(
@@ -233,6 +246,7 @@ def test_a_merge_of_one_request_sends_and_reads_it_as_itself() -> None:
         },
     )
 
+    assert request.operation_name == "CancelOrder"
     assert _sent(request)["operationName"] == "CancelOrder"
     assert isinstance(error, ExecutionError)
     assert (error.data, error.errors) == (
@@ -270,12 +284,7 @@ def test_what_cannot_keep_its_shape_in_a_merge_is_inlined_in_the_template(
 def test_every_bookshop_operation_merges_with_every_other_of_its_type_into_a_valid_document(
     bookshop_schema: GraphQLSchema,
 ) -> None:
-    operations = [
-        value
-        for module in (bookshop.app_graphql, bookshop.get_order_graphql)
-        for value in vars(module).values()
-        if isinstance(value, BookshopOperation)
-    ]
+    operations = all_bookshop_operations()
     mergeable = [
         operation
         for operation in operations

@@ -1,0 +1,14 @@
+type Query {
+  order(id: ID!): Order
+  orders: [Order!]!
+}
+
+enum OrderStatus {
+  PENDING
+  SHIPPED
+}
+
+type Order {
+  id: ID!
+  status: OrderStatus!
+}

@@ -364,8 +364,18 @@ def test_an_input_is_rejected(
     [
         pytest.param(
             lambda: Config(non_null_directive_name="non-null"),
-            "Cannot name the client directive `non-null`: Names must only contain [_a-zA-Z0-9] but 'non-null' does not.",
+            "Names must only contain [_a-zA-Z0-9] but 'non-null' does not.\nIn `non_null_directive_name`.",
             id="a non-null directive name GraphQL does not allow, checked by graphql-core",
+        ),
+        pytest.param(
+            lambda: Config(struct_interface_name="1Struct"),
+            "Names must start with [_a-zA-Z] but '1Struct' does not.\nIn `struct_interface_name`.",
+            id="a struct interface name starting with a digit",
+        ),
+        pytest.param(
+            lambda: Config(injector_names={"customer", "idempotency key"}),
+            "Names must only contain [_a-zA-Z0-9] but 'idempotency key' does not.\nIn `injector_names`.",
+            id="an injector name holding a space",
         ),
         pytest.param(
             lambda: Scalar(type="Decimal"),

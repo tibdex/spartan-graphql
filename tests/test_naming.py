@@ -2,14 +2,17 @@ import ast
 import importlib
 import sys
 from collections.abc import Callable, Iterator, Mapping
+from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import Final
 
 import pytest
 from graphql import build_schema, parse
+from hypothesis import example, given, strategies as st
 from typing_extensions import get_type_hints, is_typeddict
 
 from spartan_graphql import Config, generate
+from spartan_graphql._generator.spelling import candidates, is_bindable
 
 _SCHEMA: Final = """
 type Query {
@@ -154,7 +157,7 @@ def test_every_module_binds_each_name_once(
     for path, source in files.items():
         names = _bound_names(ast.parse(source))
         duplicates = {name for name in names if names.count(name) > 1}
-        assert not duplicates, f"{path} binds {duplicates} more than once."
+        assert not duplicates, path
 
 
 @pytest.mark.parametrize(
@@ -229,8 +232,8 @@ def test_the_package_imports_and_every_type_resolves(package_directory: Path) ->
                 get_type_hints(value, include_extras=True)
             elif isinstance(value, runtime.Operation):
                 operations.add(value._name)
-                reflection.build_parser(value._data_type, partial=False)
-                reflection.build_serializer(value._variables_type)
+                reflection.build_decoder(value._data_type, partial=False)
+                reflection.build_encoder(value._variables_type)
 
     assert len(operations) == 10
 
@@ -239,3 +242,22 @@ def test_the_package_type_checks(
     package_directory: Path, assert_type_checks: Callable[[Path], None]
 ) -> None:
     assert_type_checks(package_directory)
+
+
+@given(
+    st.from_regex(
+        # https://spec.graphql.org/September2025/#Name
+        r"\A[_A-Za-z][_0-9A-Za-z]*\Z"
+    )
+)
+@example("class").via("Python keyword")
+@example("book").via("not a Python keyword")
+def test_every_graphql_name_gets_bindable_spellings_distinct_from_one_another(
+    name: str,
+) -> None:
+    spellings = list(islice(candidates(name), 3))
+
+    assert all(is_bindable(spelling) for spelling in spellings)
+    assert len(set(spellings)) == len(spellings)
+    if is_bindable(name):
+        assert spellings[0] == name

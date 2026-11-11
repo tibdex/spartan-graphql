@@ -1,26 +1,21 @@
-import shutil
-import subprocess
-import sys
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 import pytest
 from graphql import GraphQLSchema
 
 import bookshop.transport
 from spartan_graphql import generate
-from spartan_graphql._cli._graphql_config import read_graphql_config
 from spartan_graphql.generate import _Params
-from tests._bookshop import BOOKSHOP_DIRECTORY
+from tests._bookshop import _read_bookshop_args
 from tests._graphql_server import GraphqlHandler, answer_graphql
 from tests._server import PostHandler, serve
 
 
 @pytest.fixture(name="_bookshop_args", scope="session")
 def bookshop_args_fixture() -> _Params:
-    (args,) = read_graphql_config(BOOKSHOP_DIRECTORY / "graphql.config.yml").values()
-    return args
+    return _read_bookshop_args()
 
 
 @pytest.fixture(name="bookshop_schema", scope="session")
@@ -31,50 +26,6 @@ def bookshop_schema_fixture(_bookshop_args: _Params) -> GraphQLSchema:
 @pytest.fixture(name="bookshop_files", scope="session")
 def files_fixture(_bookshop_args: _Params) -> Mapping[PurePosixPath, bytes]:
     return generate(**_bookshop_args)
-
-
-@pytest.fixture(name="assert_type_checks", params=["mypy", "pyright", "pyrefly", "ty"])
-def assert_type_checks_fixture(
-    request: pytest.FixtureRequest,
-) -> Callable[[Path], None]:
-    name = request.param
-    checker = shutil.which(name, path=str(Path(sys.executable).parent))
-    assert checker is not None, (
-        f"Expected `{name}` to be installed next to the interpreter, as a development dependency."
-    )
-
-    def assert_type_checks(package: Path, /) -> None:
-        arguments = {
-            "mypy": ["--strict", "--python-executable", sys.executable],
-            "ty": [
-                "check",
-                "--python",
-                sys.executable,
-                "--extra-search-path",
-                str(package.parent),
-            ],
-            "pyright": ["--pythonpath", sys.executable],
-            # Pyrefly's default preset reports none of the mistakes the other checkers catch.
-            "pyrefly": [
-                "check",
-                "--preset",
-                "strict",
-                "--python-interpreter-path",
-                sys.executable,
-                "--search-path",
-                str(package.parent),
-            ],
-        }[name]
-        result = subprocess.run(
-            [checker, *arguments, str(package)],
-            capture_output=True,
-            check=False,
-            cwd=package.parent,
-            encoding="utf-8",
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    return assert_type_checks
 
 
 @pytest.fixture(name="graphql_server")

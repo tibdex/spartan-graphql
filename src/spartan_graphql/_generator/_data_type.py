@@ -458,9 +458,8 @@ class DataTypeEmitter:
         non_null = self._is_non_null(field)
         field_type = as_non_null(field.type) if non_null else field.type
         statements: list[ast.stmt] = []
-        struct_input_name = self._struct_input_name(field)
 
-        if struct_input_name is not None:
+        if (struct_input_name := self._struct_input_name(field)) is not None:
             annotation: ast.expr = qualified(
                 SCHEMA, self._type_spellings[struct_input_name]
             )

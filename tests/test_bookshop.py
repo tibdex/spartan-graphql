@@ -1,6 +1,6 @@
+import asyncio
 import json
 import runpy
-from asyncio import run as run_async
 from collections.abc import Callable, Collection, Mapping
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -30,7 +30,7 @@ from bookshop.app import (
     titles,
     track,
 )
-from bookshop.async_app import title, watch as watch_async
+from bookshop.async_app import statuses_of, title_of
 from bookshop.get_order_graphql import GetOrder
 from bookshop.graphql.injection import injectors
 from bookshop.graphql.runtime import RequestError, UnexpectedNullError
@@ -70,6 +70,7 @@ def mocked_http_fixture(monkeypatch: pytest.MonkeyPatch) -> Callable[[_Handle], 
                 transport=httpx2.MockTransport(handle),
                 base_url=bookshop.async_transport.http.base_url,
                 headers=bookshop.async_transport.http.headers,
+                timeout=bookshop.async_transport.http.timeout,
             ),
         )
 
@@ -113,16 +114,15 @@ def _events(*statuses: str) -> httpx2.Response:
     )
 
 
-def test_a_title_is_awaited_with_a_timeout(
+def test_getting_a_book_s_title_asynchronously(
     mocked_http: Callable[[_Handle], None],
 ) -> None:
     def handle(request: httpx2.Request, /) -> httpx2.Response:
         assert request.url.path == "/graphql"
-        assert request.extensions["timeout"]["read"] == 5.0
         return httpx2.Response(200, json={"data": {"book": _BOOK}})
 
     mocked_http(handle)
-    book_title = run_async(title(ISBN("9780140449433")))
+    book_title = asyncio.run(title_of(ISBN("9780140449433")))
 
     assert book_title == "On Sparta"
 
@@ -133,7 +133,7 @@ def test_an_http_error_is_httpx2_s_own(mocked_http: Callable[[_Handle], None]) -
     )
 
     with pytest.raises(httpx2.HTTPStatusError) as error_info:
-        run_async(bookshop.async_transport.send(GetOrder({"id": "o1"})))
+        asyncio.run(bookshop.async_transport.send(GetOrder({"id": "o1"})))
 
     assert (
         error_info.value.response.status_code,
@@ -156,7 +156,7 @@ def test_a_request_error_is_read_whatever_its_status(
     )
 
     with pytest.raises(RequestError, match="Syntax Error"):
-        run_async(bookshop.async_transport.send(GetOrder({"id": "o1"})))
+        asyncio.run(bookshop.async_transport.send(GetOrder({"id": "o1"})))
 
 
 @pytest.mark.parametrize(
@@ -175,7 +175,7 @@ def test_watching_an_order_asynchronously_follows_its_statuses(
 ) -> None:
     mocked_http(lambda _request: _events(*events))
 
-    assert run_async(watch_async("o1")) == statuses
+    assert asyncio.run(statuses_of("o1")) == statuses
 
 
 def test_describing_a_book(bookshop_server: _StartServer) -> None:

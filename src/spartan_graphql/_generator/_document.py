@@ -93,9 +93,7 @@ def get_transitively_spread_fragments(
         def enter_fragment_spread(
             self, spread_node: FragmentSpreadNode, *_args: object
         ) -> None:
-            fragment_name = spread_node.name.value
-
-            if fragment_name not in spread:
+            if (fragment_name := spread_node.name.value) not in spread:
                 spread.add(fragment_name)
                 visit(definitions[fragment_name], self)
 

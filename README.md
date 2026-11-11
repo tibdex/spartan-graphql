@@ -5,9 +5,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/tibdex/spartan-graphql/blob/main/LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen?style=flat-square)](https://github.com/tibdex/spartan-graphql/blob/main/pyproject.toml)
 
-> **Spartan**, *adj.* … distinguished by simplicity, frugality, courage, or brevity of speech.
+> **Spartan**, _adj._ … distinguished by simplicity, frugality, courage, or brevity of speech.
 >
-> — *Oxford English Dictionary*
+> — _Oxford English Dictionary_
 
 Spartan GraphQL compiles GraphQL documents into a typed Python package, and stops there:
 
@@ -16,18 +16,28 @@ Spartan GraphQL compiles GraphQL documents into a typed Python package, and stop
 - **no redundant validation**: just dicts, statically checked[^type-checkers].
 
 Built-in:
+
 - `query`, `mutation`, and [`subscription`](#subscriptions) with their variables and selected fields typed;
-- [`union`, `interface`, `enum`, and `@oneOf` `input`](#operation-types) typed as Python unions;
+- [`union`, `interface`, `enum`, and `@oneOf` `input`](#unions) typed as Python unions;
 - [`fragment`s](#fragments) typed on their own;
 - [custom `scalar`s](#custom-scalars) converted to and from Python types;
 - [partial responses](#errors) raised as errors, or returned with their data typed.
 
 Opt-in:
+
 - [merging](#merging) operations into a single transport request;
 - [non-null assertions](#non-null-fields) on fields the schema declares nullable;
 - [structs](#structs) typing a JSON `scalar` as an `input`;
 - [injectors](#injectors) supplying a value from your transport rather than at every call;
 - [colocation](#colocation) of each Python module with its GraphQL document.
+
+Paste-in:
+
+- [tracing](#tracing) with OpenTelemetry;
+- [batching](#batching) of concurrent queries;
+- [file uploads](#file-uploads) with the GraphQL multipart request spec;
+- [runtime validation](#runtime-validation) of responses with Pydantic;
+- [fuzzing](#fuzzing) of your code with Hypothesis.
 
 ## Installation
 
@@ -45,7 +55,7 @@ The generator's only dependency is [graphql-core](https://github.com/graphql-pyt
 
 ## Quick start
 
-Every example of this README is a file of [`bookshop`](https://github.com/tibdex/spartan-graphql/tree/main/bookshop), which uses [`schema.graphqls`](https://github.com/tibdex/spartan-graphql/blob/main/bookshop/schema.graphqls):
+Every example of this README is a file of [`bookshop`](https://github.com/tibdex/spartan-graphql/tree/main/bookshop), whose schema is [`schema.graphqls`](https://github.com/tibdex/spartan-graphql/blob/main/bookshop/schema.graphqls):
 
 <!-- excerpt: bookshop/schema.graphqls -->
 
@@ -150,33 +160,23 @@ else:
 
 ## Types
 
-### Type checking over runtime validation
-
-GraphQL is strongly typed, and the server:
-
-- [validates](https://spec.graphql.org/September2025/#sec-Validation) each operation against its schema before running it;
-- [responds](https://spec.graphql.org/September2025/#sec-Response) with the selected fields and nothing else.
-
-Client-side validation is redundant[^breaking-changes].
-On the other hand, you still want to know that `order["status"]` exists and holds an `OrderStatus`, and to learn when an edited operation breaks that.
-A type checker is the best way to get that safety.
-
-The generated package therefore types each operation statically, and leaves each response as decoded from JSON (only [custom scalars](#custom-scalars) with a codec are converted).
-
-> [!NOTE]
-> Most other Python codegen libraries rely on [Pydantic](https://docs.pydantic.dev) models for both type checking and runtime validation.
-> [GraphQL Code Generator](https://the-guild.dev/graphql/codegen), the reference for generating TypeScript from GraphQL, could validate each response too, with a library such as [Zod](https://zod.dev), but relies on type checking alone.
-> Spartan GraphQL makes the same call.
-
 ### Operation types
 
 Each operation gets a type for its variables and one for its data, both keyed by the names the GraphQL document uses.
-What may be absent is a [`NotRequired`](https://docs.python.org/3/library/typing.html#typing.NotRequired) key:
+These types are for your type checker: a response stays as decoded from JSON, and only [custom scalars](#custom-scalars) with a codec are converted.
+
+#### Missing keys
+
+An optional variable or input field, or a selected field with `@include` or `@skip`, becomes a [`NotRequired`](https://docs.python.org/3/library/typing.html#typing.NotRequired) key:
 
 <!-- excerpt: bookshop/app.graphql -->
 
 ```graphql
-query ListTitles($genres: [Genre!], $first: Int, $withGenres: Boolean! = false) {
+query ListTitles(
+  $genres: [Genre!]
+  $first: Int
+  $withGenres: Boolean! = false
+) {
   books(genres: $genres, first: $first) {
     ...TitleCard
   }
@@ -213,7 +213,7 @@ def titles(
     labels: list[str] = []
 
     for book in data["books"]:
-        # Selected under `@include`, `genre` is a `NotRequired` key too.
+        # Selected with `@include`, `genre` is a `NotRequired` key too.
         if "genre" in book:
             assert_type(book["genre"], Genre)
             labels.append(f"{book['title']} ({book['genre'].lower()})")
@@ -222,6 +222,8 @@ def titles(
 
     return labels
 ```
+
+#### Unions
 
 Wherever GraphQL lets a value be one of several things, it becomes a Python union `type`:
 
@@ -255,7 +257,7 @@ def status_label(status: OrderStatus, /) -> str:
             return status.replace("_", " ").capitalize()
 ```
 
-The other way is to reject it with `case _ as never: assert_never(never)`, which:
+The other way is to reject it with `case _ as never: assert_never(never)`, an arm that:
 
 - raises an `AssertionError` at runtime;
 - makes your type checker point at every missing `case` next time you run the codegen.
@@ -336,6 +338,29 @@ def length(publication_id: str, /) -> str:
         case _ as never:
             assert_never(never)
 ```
+
+### Type checking over runtime validation
+
+GraphQL is strongly typed, and the server:
+
+- [validates](https://spec.graphql.org/September2025/#sec-Validation) each operation against its schema before executing it;
+- [responds](https://spec.graphql.org/September2025/#sec-Response) with the selected fields and nothing else.
+
+Client-side validation is therefore redundant when the server's schema has not changed since codegen.
+
+> [!NOTE]
+> Most other Python codegen libraries rely on [Pydantic](https://docs.pydantic.dev) models for both type checking and runtime validation.
+> [GraphQL Code Generator](https://the-guild.dev/graphql/codegen), the reference for generating TypeScript from GraphQL, could validate each response too, with a library such as [Zod](https://zod.dev), but relies on type checking alone.
+> Spartan GraphQL makes the same call.
+
+Even changes made to the schema after codegen rarely break your code:
+
+- well-behaved APIs [avoid breaking changes](https://graphql.org/learn/schema-design/#versioning) and deprecate fields instead;
+- a member added to a `union`, an `interface`, or an `enum` is not breaking, and you can handle it as [shown above](#unions);
+- a removed field makes the server reject the operation, so `parse()` raises a [`RequestError`](#errors).
+
+The few breaking changes left, such as a field becoming nullable or its leaf type changing, surface deeper in your code until you rerun the codegen against the deployed schema and your type checker detects them.
+If you can neither trust the server to avoid breaking changes nor rerun the codegen before it deploys one, see [runtime validation](#runtime-validation).
 
 ### Fragments
 
@@ -427,13 +452,14 @@ Only the names the generator adds, such as that `_builtins` import alias or `_Ge
 
 Shipping a transport is a slippery slope: an HTTP client to pick, then headers, authentication, timeouts, and retries.
 Every project has its own opinion on each of these, and the GraphQL specification itself [leaves the transport to each service](https://spec.graphql.org/September2025/#note-81789).
-*The only winning move is not to play.*
+_The only winning move is not to play._
 
 The small [sans-IO](https://sans-io.readthedocs.io) runtime copied into the generated package therefore has a [public API](https://github.com/tibdex/spartan-graphql/blob/main/bookshop/graphql/runtime/__init__.py) limited to:
 
 <!-- excerpt: bookshop/graphql/runtime/__init__.py -->
 
 ```python
+from . import http as http
 from .error import (
     Error as Error,
     ExecutionError as ExecutionError,
@@ -471,27 +497,22 @@ For example, the bookshop's asynchronous transport uses [httpx2](https://pydanti
 <!-- excerpt: bookshop/async_transport.py -->
 
 ```python
-GRAPHQL_RESPONSE: Final = "application/graphql-response+json"
+from bookshop.graphql.runtime.http import ACCEPT, CONTENT_TYPE, is_graphql_response
+
 http: Final = httpx2.AsyncClient(
     base_url="https://bookshop.example",
-    headers={
-        "Accept": GRAPHQL_RESPONSE,
-        "Content-Type": "application/json",
-    },
+    headers={"Accept": ACCEPT, "Content-Type": CONTENT_TYPE},
+    # No timeout of its own: the caller's `asyncio.timeout()` is the deadline.
+    timeout=None,
 )
 
 
-async def send[Data](
-    request: Request[Literal["query", "mutation"], Data],
-    /,
-    *,
-    timeout: float | None = None,
-) -> Data:
+async def send[Data](request: Request[Literal["query", "mutation"], Data], /) -> Data:
     prepared = request.prepare()
-    response = await http.post("/graphql", content=bytes(prepared), timeout=timeout)
+    response = await http.post("/graphql", content=bytes(prepared))
 
     # GraphQL over HTTP sends a request error as a response with a 4xx or 5xx status.
-    if not response.headers.get("Content-Type", "").startswith(GRAPHQL_RESPONSE):
+    if not is_graphql_response(content_type=response.headers.get("Content-Type")):
         response.raise_for_status()
 
     return prepared.parse(response.content)
@@ -502,8 +523,10 @@ async def send[Data](
 <!-- excerpt: bookshop/async_app.py -->
 
 ```python
-async def title(isbn: ISBN, /) -> str:
-    data = await send(GetBook({"lookup": {"isbn": isbn}}), timeout=5.0)
+async def title_of(isbn: ISBN, /) -> str:
+    async with asyncio.timeout(5):
+        data = await send(GetBook({"lookup": {"isbn": isbn}}))
+
     assert_type(data, GetBookData)
     return data["book"]["title"]
 ```
@@ -539,7 +562,7 @@ Leaving the `aclosing()` block unsubscribes:
 <!-- excerpt: bookshop/async_app.py -->
 
 ```python
-async def watch(order_id: str, /) -> list[OrderStatus]:
+async def statuses_of(order_id: str, /) -> list[OrderStatus]:
     statuses: list[OrderStatus] = []
     events = subscribe(OnOrderStatusChanged({"orderId": order_id}))
 
@@ -592,9 +615,15 @@ def look_up(
     return send(merge(queries))
 ```
 
-`merge()` joins the requests into one operation (telling their root fields and variables apart with an index) and splits the response back the same way.
-The server [runs mutations in order and can resolve queries in parallel](https://spec.graphql.org/September2025/#sec-Normal-and-Serial-Execution).
-As a bonus, most servers batch and cache per request, so one big query can execute faster than several small concurrent ones.
+`merge()` joins the requests into one operation (telling their root fields and variables apart by an index) and splits the response back the same way.
+The server [runs mutations in order and can resolve queries in parallel](https://spec.graphql.org/September2025/#sec-Normal-and-Serial-Execution), and since most servers batch and cache per request, one merged query can execute faster than several small concurrent ones.
+
+> [!NOTE]
+> The server sees a single dynamically merged operation rather than the individual ones, so its per-operation metrics cannot tell them apart.
+> A server allowing only [trusted documents](https://graphql.org/learn/security/#trusted-documents) rejects the merge.
+> The upside is that a merged operation is standard GraphQL, so every server supports it, unlike the [array-of-operations approach](https://github.com/graphql/graphql-over-http/issues/5) taken by some libraries.
+
+See the [batching recipe](#batching) for automatic query merging.
 
 ### Errors
 
@@ -621,11 +650,24 @@ class ExecutionError(ResponseError, Generic[_Data_co]):
 When several operations are merged, an `ExceptionGroup` holds one for each operation that fails.
 
 In an `except ExecutionError as error:` block, `error.parse_data()` returns a `Mapping[str, object] | None`, since Python types what a call returns, but not what it raises.
-You can instead call `OperationRequest.returning_error()` to get a request for which `PreparedRequest.parse()` returns its `ExecutionError` rather than raising it, so the partial data keeps the operation's type:
+A request can return its `ExecutionError` instead, so the partial data keeps the operation's type:
 
-- the result is then typed `Data | ExecutionError[Data]`, so you can tell them apart with `isinstance()`;
-- when [merging](#merging), you choose for each request whether its error is returned or raised;
-- in a subscription, an event with errors is yielded like any other, so your transport has nothing to catch.
+<!-- excerpt: bookshop/graphql/runtime/operation.py -->
+
+```python
+class OperationRequest[Type: OperationType, Data](Request[Type, Data]):
+    # …
+    def returning_error(
+        self,
+    ) -> OperationRequest[Type, Data | ExecutionError[Data]]:
+        """Return a copy of this request that returns its `ExecutionError` instead of raising it.
+
+        A `RequestError` is still raised: with no data, there is nothing to type.
+        """
+```
+
+When [merging](#merging), you choose for each request whether its error is returned or raised.
+In a subscription, an event with errors is yielded like any other, so your transport has nothing to catch.
 
 <!-- excerpt: bookshop/app.py -->
 
@@ -664,6 +706,8 @@ def cancel(order_ids: list[str], /) -> list[str]:
 ```
 
 ## Config
+
+Each option below is a key of `extensions.spartan`, next to the required `moduleRoot` and `package`.
 
 ### Custom scalars
 
@@ -805,7 +849,7 @@ class UnexpectedNullError(Error):
 
     @property
     def path(self) -> Sequence[str | int]:
-        """The keys and list indices leading from the root of the data to the `null`, as in a GraphQL error's `path`."""
+        """The keys and list indices from the root of the data to the `null`, as in a GraphQL error's `path`."""
 ```
 
 > [!NOTE]
@@ -1044,15 +1088,13 @@ ATTEMPTS: Final = 3
     attempts_left = ATTEMPTS
     # …
     while True:
-        # Declared, since mypy types a variable from its first assignment alone.
         response: HTTPResponse | HTTPError
 
         try:
             response = _post(
                 "/graphql",
                 request_body,
-                # Falls back to the plain JSON media type for a server predating the GraphQL one.
-                accept="application/graphql-response+json, application/json;q=0.9",
+                accept=ACCEPT,
                 timeout=timeout,
             )
         # …
@@ -1125,19 +1167,419 @@ from spartan_graphql.package_location import PackageLocation as PackageLocation
 from spartan_graphql.scalar import Codec as Codec, Scalar as Scalar
 ```
 
-[^typing-extensions]: Before Python 3.15, the generated package needs [`typing-extensions`](https://github.com/python/typing_extensions) to access the latest [`typing`](https://docs.python.org/3/library/typing.html) features.
-The generator declares that dependency, but the generated package is copied into your project rather than installed, so add `typing-extensions` to your own dependencies.
+## Coming from another library
+
+Most GraphQL code generators for Python give you a client class with one method per operation, with the variables as parameters and the response data as a model class.
+Here, the operation variables and response data are `TypedDict`s.
+The rest of the client is the [transport you write](#sans-io).
+With no class gathering the operations, a document's operations can live in a module next to the document: see [colocation](#colocation).
+
+Calling an operation:
+
+<!-- excerpt: bookshop/quickstart.py -->
+
+```diff
+-from bookshop.client import client
++from bookshop.transport import send
+
+-data = await client.get_order(id="o1")
+-order = data.order
++data = send(GetOrder({"id": "o1"}))
++order = data["order"]
+```
+
+Reading an `enum` as a `Literal`:
+
+<!-- excerpt: bookshop/app.py -->
+
+```diff
+ def status_label(status: OrderStatus, /) -> str:
+     match status:
+-        case OrderStatus.PENDING:
++        case "PENDING":
+             return "Being prepared"
+```
+
+Telling the members of a `union` or an `interface` apart by the presence of a key or by `__typename` rather than by class:
+
+<!-- excerpt: bookshop/app.py -->
+
+```diff
+-    if isinstance(publication, PublicationBook | PublicationMagazine):
+-        return f"{publication.title} has {publication.pages} pages."
++    if "pages" in publication:
++        return f"{publication['title']} has {publication['pages']} pages."
+
+-    match publication:
+-        case PublicationAudiobook():
+-            return f"{publication.title} lasts {publication.duration} minutes."
++    match publication["__typename"]:
++        case "Audiobook":
++            return f"{publication['title']} lasts {publication['duration']} minutes."
+```
+
+Handling a [partial response](#errors) (returned rather than raised) with its data still typed:
+
+<!-- excerpt: bookshop/app.py -->
+
+```diff
+-    try:
+-        result = await client.get_order(id=order_id)
+-    except GraphQLClientError as error:
+-        assert_type(error.data, dict[str, Any] | None)
+-        return f"Partially loaded: {error.data} ({error})."
++    result = send(GetOrder({"id": order_id}).returning_error())
++
++    if isinstance(result, ExecutionError):
++        data = result.parse_data()
++        assert_type(data, GetOrderData | None)
++        return f"Partially loaded: {data} ({result!s})."
+```
+
+Configuring in [graphql-config](#config) rather than in `pyproject.toml`:
+
+<!-- excerpt: bookshop/graphql.config.yml -->
+
+```diff
+-[tool.graphql.codegen]
+-schema_path = "schema.graphqls"
+-queries_path = "."
+-target_package_name = "client"
++schema: schema.graphqls
++documents: "*.graphql"
++# …
++extensions:
++  spartan:
++    # …
++    moduleRoot: ..
++    # …
++    package: bookshop.graphql
+```
+
+## Recipes
+
+Each [recipe](https://github.com/tibdex/spartan-graphql/tree/main/recipes) below commits to a choice Spartan GraphQL leaves to you, such as an observability stack, an async framework, an HTTP client, or a validation library.
+The library is designed to make each of them a few lines on your side, so copy them, adapt them, or combine them into the GraphQL client you need.
+
+### Tracing
+
+With this [`send()`](https://github.com/tibdex/spartan-graphql/blob/main/recipes/tracing/recipe.py) as your transport, a slow page or a failing call points at the operation behind it, in your traces and in the server's, following [OpenTelemetry's GraphQL conventions](https://opentelemetry.io/docs/specs/semconv/database/graphql/):
+
+<!-- excerpt: recipes/tracing/recipe.py -->
+
+```python
+from opentelemetry.semconv._incubating.attributes import graphql_attributes  # noqa: PLC2701 (not stable yet)
+# …
+async def send[Data](request: Request[Literal["query", "mutation"], Data], /) -> Data:
+    with tracer.start_as_current_span(
+        f"{request.operation_type} {request.operation_name}",
+        kind=SpanKind.CLIENT,
+        attributes={
+            graphql_attributes.GRAPHQL_OPERATION_NAME: request.operation_name,
+            graphql_attributes.GRAPHQL_OPERATION_TYPE: request.operation_type,
+        },
+    ) as span:
+        # In the span, so that it records variables failing to encode.
+        prepared = request.prepare()
+        # As headers, so that the server's spans join the trace.
+        trace_context: dict[str, str] = {}
+        inject(trace_context)
+
+        response = await http.post(
+            "/graphql", content=bytes(prepared), headers=trace_context
+        )
+
+        if not is_graphql_response(content_type=response.headers.get("Content-Type")):
+            response.raise_for_status()
+
+        data = prepared.parse(response.content)
+        # A merge's data is a tuple, with each returned error in its request's place.
+        results = data if isinstance(data, tuple) else (data,)
+        # A raised error, `RequestError` included, marks the span on its own, but a returned one does not.
+        if errors := [
+            str(result) for result in results if isinstance(result, ExecutionError)
+        ]:
+            span.set_status(StatusCode.ERROR, "; ".join(errors))
+
+        return data
+```
+
+### Batching
+
+With a [`QueryBatcher`](https://github.com/tibdex/spartan-graphql/blob/main/recipes/batching/recipe.py), your data-fetching functions stay independent, but their queries still get merged into a single request, letting the server [optimize their execution](#merging):
+
+<!-- excerpt: recipes/batching/test_recipe.py -->
+
+```python
+def test_the_requests_of_the_same_tick_are_merged() -> None:
+    # …
+    batcher = QueryBatcher(send)
+
+    async def order(order_id: str, /) -> GetOrderData:
+        return await batcher.send(GetOrder({"id": order_id}))
+
+    async def page() -> tuple[GetOrderData, GetOrderData]:
+        # Two parts of a page, each fetching for itself, started in the same tick.
+        header = asyncio.create_task(order("header"))
+        footer = asyncio.create_task(order("footer"))
+        return await header, await footer
+
+    first, second = asyncio.run(page())
+
+    assert_type(first, GetOrderData)
+    # …
+    # Both queries reached the transport as one merged request.
+    (request,) = sent_requests
+    assert request.operation_name == "BatchedQueries"
+```
+
+<!-- excerpt: recipes/batching/recipe.py -->
+
+```python
+class QueryBatcher:
+    """Sends the queries of one event-loop tick as one merged request, as a DataLoader does on a server."""
+    # …
+    async def send[Data](
+        self, request: OperationRequest[Literal["query"], Data], /
+    ) -> Data:
+        if self._batch is None:
+            requests: _Requests = []
+            # Not `asyncio.create_task()`, which an eager task factory would run at once.
+            # The task starts on the next tick, after the other coroutines of this tick added their request.
+            task = asyncio.Task(self._run(requests))
+            self._batch = _Batch(requests=requests, task=task)
+
+        batch = self._batch
+        index = len(batch.requests)
+        batch.requests.append(request)
+        batch.waiter_count += 1
+
+        try:
+            # A caller can give up, such as on its `asyncio.timeout()`.
+            # The shield then leaves the others their data.
+            results = await asyncio.shield(batch.task)
+        finally:
+            batch.waiter_count -= 1
+
+            # No caller waits anymore, so neither does the transport.
+            if not batch.waiter_count:
+                batch.task.cancel()
+
+        result = results[index]
+
+        if isinstance(result, ExecutionError):
+            match request.execution_error_handling:
+                case "raise":
+                    raise result
+                case "return":
+                    pass
+                case _ as never:
+                    assert_never(never)
+
+        # `Data` includes the error of a request returning it.
+        return cast(Data, result)
+
+    async def _run(self, requests: _Requests, /) -> tuple[object, ...]:
+        # The next tick starts another batch.
+        self._batch = None
+        merged = merge(
+            [
+                # So that a failed request leaves the others their data.
+                request.returning_error()
+                for request in requests
+            ],
+            operation_name="BatchedQueries",
+        )
+        return await self._send(merged)
+```
+
+### File uploads
+
+Uploading files through GraphQL is [discouraged](https://graphql.org/learn/file-uploads), but there is a [community spec](https://github.com/jaydenseric/graphql-multipart-request-spec) for it.
+Servers following the spec define a custom `Upload` scalar and expect clients to send the files in a multipart HTTP request.
+On the client side, you configure the `Upload` scalar with [this Python type](https://github.com/tibdex/spartan-graphql/blob/main/recipes/upload/recipe.py):
+
+<!-- excerpt: recipes/upload/recipe.py -->
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class Upload:
+    content: BinaryIO
+    filename: str
+    content_type: str = "application/octet-stream"
+```
+
+<!-- excerpt: recipes/upload/test_recipe.py -->
+
+```python
+def test_a_file_goes_in_the_variables_like_any_other_value(
+    # …
+) -> None:
+    cover = Upload(content=BytesIO(b"cover"), filename="cover.txt")
+    scan = Upload(content=BytesIO(b"scan"), filename="scan.txt")
+    request = AttachFiles(
+        {
+            "isbn": "9780140449433",
+            "cover": cover,
+            "attachments": [{"file": scan, "caption": "p. 3"}, {"file": cover}],
+        }
+    )
+
+    data = asyncio.run(send(request))
+```
+
+The scalar's `encode()` collects each `Upload` instance as the request is prepared:
+
+<!-- excerpt: recipes/upload/recipe.py -->
+
+```python
+_collected: ContextVar[tuple[Upload, ...]] = ContextVar("_collected")
+
+
+def encode(value: Upload, /) -> str:
+    uploads = _collected.get()
+
+    # The same file in several places is sent once, mapped to each of them.
+    index = next((i for i, upload in enumerate(uploads) if upload is value), None)
+
+    if index is None:
+        index = len(uploads)
+        _collected.set((*uploads, value))
+
+    return f"{_PREFIX}{index}"
+
+
+def _collect_uploads[T](prepare: Callable[[], T], /) -> tuple[T, tuple[Upload, ...]]:
+    context = copy_context()
+    context.run(_collected.set, ())
+    return context.run(prepare), context[_collected]
+# …
+async def send[Data](request: Request[Literal["query", "mutation"], Data], /) -> Data:
+    prepared, uploads = _collect_uploads(request.prepare)
+    post = partial(http.post, "/graphql")
+
+    if uploads:
+        response = await post(
+            data=_multipart_fields(bytes(prepared)),
+            files={
+                str(index): (upload.filename, upload.content, upload.content_type)
+                for index, upload in enumerate(uploads)
+            },
+        )
+    else:
+        response = await post(
+            content=bytes(prepared), headers={"Content-Type": CONTENT_TYPE}
+        )
+```
+
+### Runtime validation
+
+When the server deploys more often than you rerun the codegen, such as a third-party API, a [breaking change](#type-checking-over-runtime-validation) can reach your code before your type checker sees it.
+[`validate()`](https://github.com/tibdex/spartan-graphql/blob/main/recipes/validation/recipe.py) catches it as the response arrives rather than deeper in your code:
+
+<!-- excerpt: recipes/validation/test_recipe.py -->
+
+```python
+def test_a_field_made_nullable_after_codegen_is_caught() -> None:
+    request = GetOrder({"id": "o1"})
+    body = b'{"data": {"order": {"id": "o1", "status": null}}}'
+    data = request.prepare().parse(body)
+
+    with pytest.raises(
+        ValidationError,
+        match=(
+            r"^1 validation error for GetOrderData\n"
+            r"order\.status\n"
+            r"  Input should be 'PENDING' or 'SHIPPED' "
+        ),
+    ):
+        validate(data, request=request)
+```
+
+<!-- excerpt: recipes/validation/recipe.py -->
+
+```python
+def validate[Data](data: Data, /, *, request: Request[Any, Data]) -> None:
+    if isinstance(data, tuple):
+        # A merge's data, in which each request may have returned its error.
+        for item, data_type in zip(data, get_args(request.data_type), strict=True):
+            _validate(item, data_type)
+    else:
+        _validate(data, request.data_type)
+
+
+def _validate(data: object, data_type: type[object], /) -> None:
+    match data:
+        case ExecutionError():
+            # An error can leave no data at all.
+            if (partial_data := data.parse_data()) is not None:
+                _validate(partial_data, data_type)
+        case _:
+            _adapter(
+                # mypy does not see a type as hashable.
+                data_type  # type: ignore[arg-type]
+            ).validate_python(data, strict=True)
+```
+
+Call `validate()` in your transport, right after `parse()`, so that no response goes unchecked.
+
+> [!IMPORTANT]
+> You can either validate responses or accept a union member added after codegen, but not both: `validate()` rejects the member before your [`case _:` arm](#unions) can see it.
+
+### Fuzzing
+
+[`data_strategy()`](https://github.com/tibdex/spartan-graphql/blob/main/recipes/fuzzing/recipe.py) implements a [Hypothesis](https://github.com/hypothesisworks/hypothesis) search strategy to fuzz your functions accepting GraphQL response data without any running GraphQL server:
+
+<!-- excerpt: recipes/fuzzing/test_recipe.py -->
+
+```python
+from hypothesis import given, strategies as st
+# …
+def ean_13_barcode(data: GetOrderData, /) -> int | None:
+    order = data["order"]
+
+    if order is None:
+        return None
+
+    gs1_prefix = order["isbn"][:3]
+    assert gs1_prefix in {"978", "979"}
+    return int(order["isbn"])
+
+
+@given(example=st.data())
+def test_your_code_handles_any_order_the_server_can_send(
+    example: st.DataObject,
+) -> None:
+    data = example.draw(data_strategy(GetOrder({"id": "o1"})))
+    assert_type(data, GetOrderData)
+    ean_13_barcode(data)
+```
+
+<!-- excerpt: recipes/fuzzing/recipe.py -->
+
+```python
+ISBN = NewType("ISBN", str)
+
+# Without it, any `str` is drawn: the supertype of the `NewType`.
+st.register_type_strategy(
+    # Hypothesis supports a `NewType` here, but its annotation leaves it out.
+    cast(Any, ISBN),
+    st.from_regex(r"97[89][0-9]{10}", fullmatch=True),
+)
+
+
+def data_strategy[Data](request: Request[Any, Data], /) -> st.SearchStrategy[Data]:
+    return st.from_type(request.data_type)
+```
+
+[^typing-extensions]:
+    Before Python 3.15, the generated package needs [`typing-extensions`](https://github.com/python/typing_extensions) to access the latest [`typing`](https://docs.python.org/3/library/typing.html) features.
+    The generator declares that dependency, but the generated package is copied into your project rather than installed, so add `typing-extensions` to your own dependencies.
 
 [^type-checkers]: The generated code is tested against [mypy](https://github.com/python/mypy), [Pyright](https://github.com/microsoft/pyright), [Pyrefly](https://github.com/facebook/pyrefly), and [ty](https://github.com/astral-sh/ty).
 
-[^bootstrapping]: This library is partly [bootstrapped](https://en.wikipedia.org/wiki/Bootstrapping_(compilers)): to fetch a schema from a URL, [it uses an operation](https://github.com/tibdex/spartan-graphql/blob/main/src/spartan_graphql/_cli/_introspection.py) it generated itself from [`_introspection.graphql`](https://github.com/tibdex/spartan-graphql/blob/main/src/spartan_graphql/_cli/_introspection.graphql).
+[^bootstrapping]: This library is partly [bootstrapped](<https://en.wikipedia.org/wiki/Bootstrapping_(compilers)>): to fetch a schema from a URL, [it uses an operation](https://github.com/tibdex/spartan-graphql/blob/main/src/spartan_graphql/_cli/_introspection.py) it generated itself from [`_introspection.graphql`](https://github.com/tibdex/spartan-graphql/blob/main/src/spartan_graphql/_cli/_introspection.graphql).
 
-[^yaml]: A YAML config, like the quick start's, needs the `yaml` extra: install `spartan-graphql[yaml]` instead.
-JSON and TOML configs need nothing more.
-
-[^breaking-changes]: Well-behaved GraphQL APIs [avoid breaking changes](https://graphql.org/learn/schema-design/#versioning), adding fields and [deprecating](https://spec.graphql.org/September2025/#sec--deprecated) old ones instead.
-Most breaking changes made after codegen never reach the code anyway: removing or renaming a field, changing its arguments, or turning its type from an object into a leaf or the reverse invalidates the operation, so the server rejects it, and `PreparedRequest.parse()` raises a [`RequestError`](#errors).
-The few left are a field becoming nullable, its leaf type changing, or a field switching between a list and a single value.
-Client-side validation would catch these as the response arrives.
-Without it, they surface deeper in your code, or not at all.
-The more often you rerun the codegen against the deployed schema, the sooner your type checker catches such a change.
+[^yaml]:
+    A YAML config, like the quick start's, needs the `yaml` extra: install `spartan-graphql[yaml]` instead.
+    JSON and TOML configs need nothing more.

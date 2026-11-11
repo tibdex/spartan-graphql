@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable, Mapping
 from typing import Final, cast, final
 
-from ._reflection import build_injector_serializers
+from ._reflection import build_injector_encoders
 
 if sys.version_info >= (3, 15):
     OMITTED = sentinel("OMITTED")  # noqa: F821
@@ -31,7 +31,7 @@ class _Injectors:
         self._functions: Final = {
             name: cast(_Injector, function) for name, function in functions.items()
         }
-        self._serializers: Final = build_injector_serializers(injector_functions_type)
+        self._encoders: Final = build_injector_encoders(injector_functions_type)
 
     def _inject(
         self,
@@ -50,11 +50,11 @@ class _Injectors:
             if value is OMITTED:
                 continue
 
-            serialize = self._serializers[name]
-            serialized = value if serialize is None else serialize(value)
+            encode = self._encoders[name]
+            encoded = value if encode is None else encode(value)
 
             for path in injections[name]:
-                injected = _inject_into(variables, path, key=name, value=serialized)
+                injected = _inject_into(variables, path, key=name, value=encoded)
 
                 if injected is not None:
                     variables = injected

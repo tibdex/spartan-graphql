@@ -11,7 +11,7 @@ from typing import Any, Final, assert_never, cast, final, override
 
 from ._execution_error_handling import ExecutionErrorHandling
 from ._operation_type import OperationType
-from ._reflection import Convert, build_parser, build_serializer
+from ._reflection import Convert, build_decoder, build_encoder
 from ._sigil import SIGIL
 from .error import Error, ExecutionError, GraphqlError, ProtocolError, RequestError
 from .injection import _Injectors
@@ -58,7 +58,7 @@ class Operation[Type: OperationType, Variables: Mapping[str, object], Data]:
         A method rather than a function taking both, so every type checker checks the variables against their exact type.
         """
         return OperationRequest(
-            operation=self, variables=variables, on_execution_error="raise"
+            operation=self, variables=variables, execution_error_handling="raise"
         )
 
     @override
@@ -67,16 +67,16 @@ class Operation[Type: OperationType, Variables: Mapping[str, object], Data]:
         return f"<{self._operation_type} {self._name}>"
 
     @cached_property
-    def _data_parser(self) -> Convert | None:
-        return build_parser(self._data_type, partial=False)
+    def _data_decoder(self) -> Convert | None:
+        return build_decoder(self._data_type, partial=False)
 
     @cached_property
-    def _partial_data_parser(self) -> Convert | None:
-        return build_parser(self._data_type, partial=True)
+    def _partial_data_decoder(self) -> Convert | None:
+        return build_decoder(self._data_type, partial=True)
 
     @cached_property
-    def _variables_serializer(self) -> Convert | None:
-        return build_serializer(self._variables_type)
+    def _variables_encoder(self) -> Convert | None:
+        return build_encoder(self._variables_type)
 
     @cached_property
     def _request_prefix(self) -> bytes:
@@ -100,20 +100,24 @@ class OperationRequest[Type: OperationType, Data](Request[Type, Data]):
         # `Any`: `Operation.__call__` already checked the variables.
         operation: Operation[Type, Any, Data],
         variables: Mapping[str, object],
-        on_execution_error: ExecutionErrorHandling,
+        execution_error_handling: ExecutionErrorHandling,
     ) -> None:
         """Private."""
-        super().__init__(operation_type=operation._operation_type)
+        super().__init__(
+            operation_type=operation._operation_type,
+            operation_name=operation._name,
+            data_type=operation._data_type,
+        )
         self._operation: Final = operation
         self._variables: Final = variables
-        self._on_execution_error: Final = on_execution_error
+        self.execution_error_handling: Final = execution_error_handling
 
     @override
     def __repr__(self) -> str:
         # As written: the operation called with its variables.
         call = f"{self._operation._name}({self._variables!r})"
 
-        match self._on_execution_error:
+        match self.execution_error_handling:
             case "raise":
                 return call
             case "return":
@@ -124,28 +128,31 @@ class OperationRequest[Type: OperationType, Data](Request[Type, Data]):
     def returning_error(
         self,
     ) -> OperationRequest[Type, Data | ExecutionError[Data]]:
-        """Return a copy of this request for which `PreparedRequest.parse()` returns its `ExecutionError` instead of raising it."""
+        """Return a copy of this request that returns its `ExecutionError` instead of raising it.
+
+        A `RequestError` is still raised: with no data, there is nothing to type.
+        """
         # Sound since `Data` is covariant: a request returning its data is one returning its data or its error.
         return OperationRequest(
             operation=self._operation,
             variables=self._variables,
-            on_execution_error="return",
+            execution_error_handling="return",
         )
 
     @override
     def prepare(self, *, injectors: _Injectors | None = None) -> PreparedRequest[Data]:
         operation = self._operation
         variables = _resolve_variables(operation, self._variables, injectors=injectors)
-        on_execution_error = self._on_execution_error
+        execution_error_handling = self.execution_error_handling
 
-        def parse(raw: bytes, /) -> Data:
+        def parse(body: bytes, /) -> Data:
             try:
-                return _parse_data(operation, raw)
+                return _parse_data(operation, body)
             except Error as error:
                 error.add_note(_origin_note(operation._name, variables))
 
                 if isinstance(error, ExecutionError):
-                    match on_execution_error:
+                    match execution_error_handling:
                         case "raise":
                             pass
                         case "return":
@@ -166,11 +173,9 @@ def _resolve_variables(
     *,
     injectors: _Injectors | None = None,
 ) -> Mapping[str, object]:
-    serialize = operation._variables_serializer
+    encode = operation._variables_encoder
     values = (
-        variables
-        if serialize is None
-        else cast(Mapping[str, object], serialize(variables))
+        variables if encode is None else cast(Mapping[str, object], encode(variables))
     )
 
     if injectors is not None:
@@ -186,32 +191,30 @@ def _resolve_variables(
 
 
 def _parse_data[Data](
-    operation: Operation[OperationType, Any, Data], raw: bytes, /
+    operation: Operation[OperationType, Any, Data], body: bytes, /
 ) -> Data:
-    data = _parse_response(raw, partial_data_parser=operation._partial_data_parser)
+    data = _parse_response(body, partial_data_decoder=operation._partial_data_decoder)
 
-    if operation._data_parser is not None:
-        operation._data_parser(data)
+    if operation._data_decoder is not None:
+        operation._data_decoder(data)
 
     return cast(Data, data)
 
 
 def _parse_response(
-    raw: bytes, /, *, partial_data_parser: Convert | None
+    body: bytes, /, *, partial_data_decoder: Convert | None
 ) -> Mapping[str, object]:
     try:
-        payload = loads(raw)
+        payload = loads(body)
     except JSONDecodeError as error:
         raise ProtocolError(
-            f"Expected a JSON response but got: {raw[:200]!r}."
+            f"Expected a JSON response but got: {body[:200]!r}."
         ) from error
 
     if not isinstance(payload, dict):
-        raise ProtocolError(f"Expected a JSON object response but got: {raw[:200]!r}.")
+        raise ProtocolError(f"Expected a JSON object response but got: {body[:200]!r}.")
 
-    errors = payload.get("errors")
-
-    if errors:
+    if errors := payload.get("errors"):
         formatted = cast(list[GraphqlError], errors)
         extensions = payload.get("extensions")
 
@@ -223,14 +226,14 @@ def _parse_response(
             formatted,
             data=payload["data"],
             extensions=extensions,
-            partial_data_parser=partial_data_parser,
+            partial_data_decoder=partial_data_decoder,
         )
 
     data = payload.get("data")
 
     if not isinstance(data, dict):
         raise ProtocolError(
-            f"Expected the response to carry `data` but got: {raw[:200]!r}."
+            f"Expected the response to carry `data` but got: {body[:200]!r}."
         )
 
     return cast(Mapping[str, object], data)

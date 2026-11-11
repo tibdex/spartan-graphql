@@ -1,7 +1,6 @@
 from collections.abc import Mapping
 from http.client import HTTPResponse
-from mimetypes import types_map
-from typing import Final, Literal, TypeAlias
+from typing import Literal, TypeAlias
 from urllib.request import Request as HTTPRequest, urlopen
 
 from graphql import (
@@ -18,9 +17,7 @@ from spartan_graphql._cli._introspection_graphql import (
 )
 from spartan_graphql._metadata import DISTRIBUTION_NAME, METADATA
 from spartan_graphql.runtime import Operation, Request
-
-_JSON: Final = types_map[".json"]
-_GRAPHQL_RESPONSE: Final = "application/graphql-response+json"
+from spartan_graphql.runtime.http import ACCEPT, CONTENT_TYPE
 
 
 def _field_names(type_: FieldNames, /) -> frozenset[str]:
@@ -61,8 +58,8 @@ def fetch_sdl(url: str, /, *, headers: Mapping[str, str]) -> str:
         http_request = HTTPRequest(  # noqa: S310
             url,
             headers={
-                "Accept": f"{_GRAPHQL_RESPONSE}, {_JSON}",
-                "Content-Type": _JSON,
+                "Accept": ACCEPT,
+                "Content-Type": CONTENT_TYPE,
                 "User-Agent": f"{DISTRIBUTION_NAME}/{METADATA['Version']}",
                 **headers,
             },
