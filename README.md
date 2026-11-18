@@ -1260,6 +1260,15 @@ Configuring in [graphql-config](#config) rather than in `pyproject.toml`:
 +    package: bookshop.graphql
 ```
 
+### When to pick another library
+
+Spartan GraphQL is not the right fit when:
+
+- you need to support Python versions older than 3.12;
+- you build selections at runtime rather than writing them all in documents;
+- you prefer discovering operations by autocompleting a client's methods rather than importing standalone operations;
+- you prefer variables and data as classes with attributes rather than `TypedDict`s: type checkers support both equally, but some language servers find the references to an attribute more reliably than those to a key.
+
 ## Recipes
 
 Each [recipe](https://github.com/tibdex/spartan-graphql/tree/main/recipes) below commits to a choice Spartan GraphQL leaves to you, such as an observability stack, an async framework, an HTTP client, or a validation library.
