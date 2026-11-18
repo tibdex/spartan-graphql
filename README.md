@@ -339,6 +339,8 @@ def length(publication_id: str, /) -> str:
             assert_never(never)
 ```
 
+See the [runtime validation recipe](#runtime-validation) for rejecting a member added after codegen when the response arrives.
+
 ### Type checking over runtime validation
 
 GraphQL is strongly typed, and the server:
@@ -532,7 +534,7 @@ async def title_of(isbn: ISBN, /) -> str:
 ```
 
 [`transport.py`](https://github.com/tibdex/spartan-graphql/blob/main/bookshop/transport.py) does the same with the standard library alone.
-If your transport treats queries and mutations differently, such as sending queries with [`GET`](https://http-spec.graphql.org/draft/#sec-GET), you can switch on `Request.operation_type`.
+If your transport treats queries and mutations differently, such as sending queries with [`GET`](https://http-spec.graphql.org/September2026/#sec-GET), you can switch on `Request.operation_type`.
 
 ### Subscriptions
 
@@ -785,6 +787,8 @@ def cheaper_than(limit: Decimal, /) -> list[str]:
 
     return labels
 ```
+
+See the [file uploads recipe](#file-uploads) for a codec used to collect files to upload.
 
 ### Non-null fields
 
@@ -1428,7 +1432,8 @@ def test_a_file_goes_in_the_variables_like_any_other_value(
     data = asyncio.run(send(request))
 ```
 
-The scalar's `encode()` collects each `Upload` instance as the request is prepared:
+Most codecs should be pure, but they don't have to be.
+Here, the scalar's `encode()` collects each `Upload` instance as the request is prepared:
 
 <!-- excerpt: recipes/upload/recipe.py -->
 

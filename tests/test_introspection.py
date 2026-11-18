@@ -1,7 +1,11 @@
+import json
 from collections.abc import Callable, Mapping
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path, PurePosixPath
 from typing import Final
+from urllib.error import HTTPError
 
+import pytest
 from graphql import (
     GraphQLSchema,
     Source,
@@ -15,7 +19,10 @@ from graphql import (
 import spartan_graphql
 from spartan_graphql import Config, DocumentSiblingModule, PackageLocation, generate
 from spartan_graphql._cli._introspection import fetch_sdl
+from spartan_graphql.runtime import RequestError
+from spartan_graphql.runtime.http import GRAPHQL_RESPONSE_JSON_MEDIA_TYPE
 from tests._graphql_server import GraphqlHandler
+from tests._server import PostHandler, serve
 
 _PACKAGE_DIRECTORY: Final = Path(spartan_graphql.__file__).parent
 _DOCUMENT: Final = _PACKAGE_DIRECTORY / "_cli" / "_introspection.graphql"
@@ -100,6 +107,40 @@ def test_an_older_endpoint_is_asked_only_what_it_knows(
     fetch_sdl(graphql_server(handle), headers={})
 
     assert queries[1] == get_introspection_query()
+
+
+_REFUSAL: Final = "Introspection is disabled."
+
+
+def _refusing(*, content_type: str) -> PostHandler:
+    def handle(handler: BaseHTTPRequestHandler, /) -> None:
+        # Read the body first, or closing resets the connection and may lose the response.
+        handler.rfile.read(int(handler.headers["Content-Length"]))
+        handler.send_response(422)
+        handler.send_header("Content-Type", content_type)
+        handler.end_headers()
+        handler.wfile.write(json.dumps({"errors": [{"message": _REFUSAL}]}).encode())
+
+    return handle
+
+
+def test_an_http_error_is_urllib_s_own() -> None:
+    with (
+        serve(_refusing(content_type="text/plain")) as url,
+        pytest.raises(HTTPError) as error_info,
+    ):
+        fetch_sdl(url, headers={})
+
+    # urllib's error holds the response open.
+    error_info.value.close()
+
+
+def test_a_request_error_is_read_whatever_its_status() -> None:
+    with (
+        serve(_refusing(content_type=GRAPHQL_RESPONSE_JSON_MEDIA_TYPE)) as url,
+        pytest.raises(RequestError, match=_REFUSAL),
+    ):
+        fetch_sdl(url, headers={})
 
 
 if __name__ == "__main__":

@@ -1,9 +1,4 @@
-"""
-Which fields the server's introspection types have.
-The full introspection query then asks only for those, since an older server rejects a field it does not know.
-"""
 query IntrospectionProbe {
-  # Every server knows these types and their fields, which the spec defines.
   schema: __type(name: "__Schema") @nonNull {
     ...FieldNames
   }

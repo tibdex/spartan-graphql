@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from http.client import HTTPResponse
 from typing import Literal, TypeAlias
+from urllib.error import HTTPError
 from urllib.request import Request as HTTPRequest, urlopen
 
 from graphql import (
@@ -17,7 +18,7 @@ from spartan_graphql._cli._introspection_graphql import (
 )
 from spartan_graphql._metadata import DISTRIBUTION_NAME, METADATA
 from spartan_graphql.runtime import Operation, Request
-from spartan_graphql.runtime.http import ACCEPT, CONTENT_TYPE
+from spartan_graphql.runtime.http import ACCEPT, CONTENT_TYPE, is_graphql_response
 
 
 def _field_names(type_: FieldNames, /) -> frozenset[str]:
@@ -66,12 +67,19 @@ def fetch_sdl(url: str, /, *, headers: Mapping[str, str]) -> str:
             data=request_body,
         )
 
-        response = urlopen(  # noqa: S310
-            http_request,
-            timeout=30.0,  # graphql-config has no option for it.
-        )
-        # The only response an `http:` or `https:` URL gives.
-        assert isinstance(response, HTTPResponse)
+        try:
+            response = urlopen(  # noqa: S310
+                http_request,
+                timeout=30.0,  # graphql-config has no option for it.
+            )
+            # The only response an `http:` or `https:` URL gives.
+            assert isinstance(response, HTTPResponse)
+        except HTTPError as error:
+            # GraphQL over HTTP sends a request error as a response with a 4xx or 5xx status.
+            if not is_graphql_response(content_type=error.headers.get("Content-Type")):
+                raise
+
+            response = error
 
         with response:
             response_body = response.read()
