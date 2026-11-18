@@ -35,7 +35,7 @@ license-files = ["LICENSE"]
 name = "spartan-graphql"
 readme = "README.md"
 requires-python = ">=3.12"
-version = "1.1.0"
+version = "1.1.1"
 
 [project.optional-dependencies]
 # Only reading a YAML graphql-config file needs it.
@@ -68,6 +68,9 @@ dev = [
   "ty",
   "types-pyyaml",                       # So that `_get_loader()` can return `yaml.safe_load` typed.
 ]
+
+[tool.uv]
+trusted-publishing = "always"
 
 [tool.uv.build-backend]
 module-name = "spartan_graphql"
@@ -113,6 +116,9 @@ extend-exclude = [
   # Its code blocks are the generated package's and the bookshop's modules verbatim, which `test_readme.py` checks.
   "README.md",
 ]
+fix = true
+# prek names each file, which ruff would otherwise check even when excluded.
+force-exclude = true
 
 [tool.ruff.lint]
 # Preview mode, for naming rules rather than numbering them; its rules stay out of `ALL`.

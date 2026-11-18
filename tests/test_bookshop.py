@@ -34,6 +34,7 @@ from bookshop.async_app import statuses_of, title_of
 from bookshop.get_order_graphql import GetOrder
 from bookshop.graphql.injection import injectors
 from bookshop.graphql.runtime import RequestError, UnexpectedNullError
+from bookshop.graphql.runtime.http import GRAPHQL_RESPONSE_JSON_MEDIA_TYPE
 from bookshop.graphql.schema import Address, Genre, OrderStatus
 from bookshop.scalar import ISBN
 from tests._bookshop import BOOKSHOP_DIRECTORY
@@ -151,7 +152,7 @@ def test_a_request_error_is_read_whatever_its_status(
         lambda _request: httpx2.Response(
             400,
             content=b'{"errors": [{"message": "Syntax Error."}]}',
-            headers={"Content-Type": "application/graphql-response+json"},
+            headers={"Content-Type": GRAPHQL_RESPONSE_JSON_MEDIA_TYPE},
         )
     )
 

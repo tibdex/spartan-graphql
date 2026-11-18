@@ -13,6 +13,7 @@ import bookshop.transport
 from bookshop.app import statuses_of
 from bookshop.app_graphql import GetBook, OnOrderStatusChanged
 from bookshop.graphql.runtime import ExecutionError, RequestError
+from bookshop.graphql.runtime.http import GRAPHQL_RESPONSE_JSON_MEDIA_TYPE
 from bookshop.scalar import ISBN
 from tests._server import PostHandler
 
@@ -147,7 +148,7 @@ def test_a_request_error_is_read_whatever_its_status(
         # Read the body first, or closing resets the connection and may lose the response.
         _read_body(handler)
         handler.send_response(400)
-        handler.send_header("Content-Type", "application/graphql-response+json")
+        handler.send_header("Content-Type", GRAPHQL_RESPONSE_JSON_MEDIA_TYPE)
         handler.end_headers()
         handler.wfile.write(b'{"errors": [{"message": "Syntax Error."}]}')
 

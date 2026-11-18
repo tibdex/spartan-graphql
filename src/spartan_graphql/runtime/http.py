@@ -1,6 +1,6 @@
 # Copied into each generated package, where this line becomes a `DO NOT EDIT` header.
 
-"""The parts of the GraphQL over HTTP spec (https://http-spec.graphql.org/draft) applicable to the client side."""
+"""The parts of the GraphQL over HTTP spec (https://http-spec.graphql.org/September2026) applicable to the client side."""
 
 from typing import Final
 

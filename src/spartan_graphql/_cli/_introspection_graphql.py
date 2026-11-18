@@ -50,5 +50,3 @@ fragment FieldNames on __Type {
     name
   }
 }""", variables_type=IntrospectionProbeVariables, data_type=IntrospectionProbeData)
-"""Which fields the server's introspection types have.
-The full introspection query then asks only for those, since an older server rejects a field it does not know."""
